@@ -1,4 +1,5 @@
 import mxnet as mx
+import anchor_target
 import proposal
 import proposal_target
 from rcnn.config import config
@@ -85,11 +86,11 @@ def get_vgg_rcnn(num_classes=config.NUM_CLASSES):
     bbox_weight = mx.symbol.Reshape(data=bbox_weight, shape=(-1, 4 * num_classes), name='bbox_weight_reshape')
 
     # shared convolutional layers
-    relu5_3 = get_vgg_conv(data)
+    conv_feat = get_vgg_conv(data)
 
     # Fast R-CNN
     pool5 = mx.symbol.ROIPooling(
-        name='roi_pool5', data=relu5_3, rois=rois, pooled_size=(7, 7), spatial_scale=1.0 / config.RCNN_FEAT_STRIDE)
+        name='roi_pool', data=conv_feat, rois=rois, pooled_size=(7, 7), spatial_scale=1.0 / config.RCNN_FEAT_STRIDE)
     # group 6
     flatten = mx.symbol.Flatten(data=pool5, name="flatten")
     fc6 = mx.symbol.FullyConnected(data=flatten, num_hidden=4096, name="fc6")
@@ -129,11 +130,11 @@ def get_vgg_rcnn_test(num_classes=config.NUM_CLASSES):
     rois = mx.symbol.Reshape(data=rois, shape=(-1, 5), name='rois_reshape')
 
     # shared convolutional layer
-    relu5_3 = get_vgg_conv(data)
+    conv_feat = get_vgg_conv(data)
     
     # Fast R-CNN
     pool5 = mx.symbol.ROIPooling(
-        name='roi_pool5', data=relu5_3, rois=rois, pooled_size=(7, 7), spatial_scale=1.0 / config.RCNN_FEAT_STRIDE)
+        name='roi_pool', data=conv_feat, rois=rois, pooled_size=(7, 7), spatial_scale=1.0 / config.RCNN_FEAT_STRIDE)
     # group 6
     flatten = mx.symbol.Flatten(data=pool5, name="flatten")
     fc6 = mx.symbol.FullyConnected(data=flatten, num_hidden=4096, name="fc6")
@@ -165,16 +166,25 @@ def get_vgg_rpn(num_anchors=config.NUM_ANCHORS):
     :return: Symbol
     """
     data = mx.symbol.Variable(name="data")
-    label = mx.symbol.Variable(name='label')
-    bbox_target = mx.symbol.Variable(name='bbox_target')
-    bbox_weight = mx.symbol.Variable(name='bbox_weight')
+    im_info = mx.symbol.Variable(name="im_info")
+    gt_boxes = mx.symbol.Variable(name="gt_boxes")
 
     # shared convolutional layers
-    relu5_3 = get_vgg_conv(data)
+    conv_feat = get_vgg_conv(data)
+
+    # get rpn data
+    group = mx.symbol.Custom(
+            conv_feat=conv_feat, gt_boxes=gt_boxes, im_info=im_info, name='anchor_target',
+            op_type='anchor_target', feat_stride=config.RPN_FEAT_STRIDE,
+            scales=tuple(config.ANCHOR_SCALES), ratios=tuple(config.ANCHOR_RATIOS),
+            allowed_border=config.ALLOWED_BORDER)
+    label = group[0]
+    bbox_target = group[1]
+    bbox_weight = group[2]
 
     # RPN
     rpn_conv = mx.symbol.Convolution(
-        data=relu5_3, kernel=(3, 3), pad=(1, 1), num_filter=512, name="rpn_conv_3x3")
+        data=conv_feat, kernel=(3, 3), pad=(1, 1), num_filter=512, name="rpn_conv_3x3")
     rpn_relu = mx.symbol.Activation(data=rpn_conv, act_type="relu", name="rpn_relu")
     rpn_cls_score = mx.symbol.Convolution(
         data=rpn_relu, kernel=(1, 1), pad=(0, 0), num_filter=2 * num_anchors, name="rpn_cls_score")
@@ -192,7 +202,7 @@ def get_vgg_rpn(num_anchors=config.NUM_ANCHORS):
     bbox_loss_ = bbox_weight * mx.symbol.smooth_l1(name='bbox_loss_', scalar=3.0, data=(rpn_bbox_pred - bbox_target))
     bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / config.TRAIN.RPN_BATCH_SIZE)
     # group output
-    group = mx.symbol.Group([cls_prob, bbox_loss])
+    group = mx.symbol.Group([cls_prob, bbox_loss, label])
     return group
 
 
@@ -206,11 +216,11 @@ def get_vgg_rpn_test(num_anchors=config.NUM_ANCHORS):
     im_info = mx.symbol.Variable(name="im_info")
 
     # shared convolutional layers
-    relu5_3 = get_vgg_conv(data)
+    conv_feat = get_vgg_conv(data)
 
     # RPN
     rpn_conv = mx.symbol.Convolution(
-        data=relu5_3, kernel=(3, 3), pad=(1, 1), num_filter=512, name="rpn_conv_3x3")
+        data=conv_feat, kernel=(3, 3), pad=(1, 1), num_filter=512, name="rpn_conv_3x3")
     rpn_relu = mx.symbol.Activation(data=rpn_conv, act_type="relu", name="rpn_relu")
     rpn_cls_score = mx.symbol.Convolution(
         data=rpn_relu, kernel=(1, 1), pad=(0, 0), num_filter=2 * num_anchors, name="rpn_cls_score")
@@ -254,11 +264,11 @@ def get_vgg_test(num_classes=config.NUM_CLASSES, num_anchors=config.NUM_ANCHORS)
     im_info = mx.symbol.Variable(name="im_info")
 
     # shared convolutional layers
-    relu5_3 = get_vgg_conv(data)
+    conv_feat = get_vgg_conv(data)
 
     # RPN
     rpn_conv = mx.symbol.Convolution(
-        data=relu5_3, kernel=(3, 3), pad=(1, 1), num_filter=512, name="rpn_conv_3x3")
+        data=conv_feat, kernel=(3, 3), pad=(1, 1), num_filter=512, name="rpn_conv_3x3")
     rpn_relu = mx.symbol.Activation(data=rpn_conv, act_type="relu", name="rpn_relu")
     rpn_cls_score = mx.symbol.Convolution(
         data=rpn_relu, kernel=(1, 1), pad=(0, 0), num_filter=2 * num_anchors, name="rpn_cls_score")
@@ -288,7 +298,7 @@ def get_vgg_test(num_classes=config.NUM_CLASSES, num_anchors=config.NUM_ANCHORS)
 
     # Fast R-CNN
     pool5 = mx.symbol.ROIPooling(
-        name='roi_pool5', data=relu5_3, rois=rois, pooled_size=(7, 7), spatial_scale=1.0 / config.RCNN_FEAT_STRIDE)
+        name='roi_pool', data=conv_feat, rois=rois, pooled_size=(7, 7), spatial_scale=1.0 / config.RCNN_FEAT_STRIDE)
     # group 6
     flatten = mx.symbol.Flatten(data=pool5, name="flatten")
     fc6 = mx.symbol.FullyConnected(data=flatten, num_hidden=4096, name="fc6")
@@ -323,16 +333,23 @@ def get_vgg_train(num_classes=config.NUM_CLASSES, num_anchors=config.NUM_ANCHORS
     data = mx.symbol.Variable(name="data")
     im_info = mx.symbol.Variable(name="im_info")
     gt_boxes = mx.symbol.Variable(name="gt_boxes")
-    rpn_label = mx.symbol.Variable(name='label')
-    rpn_bbox_target = mx.symbol.Variable(name='bbox_target')
-    rpn_bbox_weight = mx.symbol.Variable(name='bbox_weight')
 
     # shared convolutional layers
-    relu5_3 = get_vgg_conv(data)
+    conv_feat = get_vgg_conv(data)
+
+    # get rpn data
+    group = mx.symbol.Custom(
+            conv_feat=conv_feat, gt_boxes=gt_boxes, im_info=im_info, name='anchor_target',
+            op_type='anchor_target', feat_stride=config.RPN_FEAT_STRIDE,
+            scales=tuple(config.ANCHOR_SCALES), ratios=tuple(config.ANCHOR_RATIOS),
+            allowed_border=config.ALLOWED_BORDER)
+    rpn_label = group[0]
+    rpn_bbox_target = group[1]
+    rpn_bbox_weight = group[2]
 
     # RPN layers
     rpn_conv = mx.symbol.Convolution(
-        data=relu5_3, kernel=(3, 3), pad=(1, 1), num_filter=512, name="rpn_conv_3x3")
+        data=conv_feat, kernel=(3, 3), pad=(1, 1), num_filter=512, name="rpn_conv_3x3")
     rpn_relu = mx.symbol.Activation(data=rpn_conv, act_type="relu", name="rpn_relu")
     rpn_cls_score = mx.symbol.Convolution(
         data=rpn_relu, kernel=(1, 1), pad=(0, 0), num_filter=2 * num_anchors, name="rpn_cls_score")
@@ -381,7 +398,7 @@ def get_vgg_train(num_classes=config.NUM_CLASSES, num_anchors=config.NUM_ANCHORS
 
     # Fast R-CNN
     pool5 = mx.symbol.ROIPooling(
-        name='roi_pool5', data=relu5_3, rois=rois, pooled_size=(7, 7), spatial_scale=1.0 / config.RCNN_FEAT_STRIDE)
+        name='roi_pool', data=conv_feat, rois=rois, pooled_size=(7, 7), spatial_scale=1.0 / config.RCNN_FEAT_STRIDE)
     # group 6
     flatten = mx.symbol.Flatten(data=pool5, name="flatten")
     fc6 = mx.symbol.FullyConnected(data=flatten, num_hidden=4096, name="fc6")
@@ -404,5 +421,6 @@ def get_vgg_train(num_classes=config.NUM_CLASSES, num_anchors=config.NUM_ANCHORS
     cls_prob = mx.symbol.Reshape(data=cls_prob, shape=(config.TRAIN.BATCH_IMAGES, -1, num_classes), name='cls_prob_reshape')
     bbox_loss = mx.symbol.Reshape(data=bbox_loss, shape=(config.TRAIN.BATCH_IMAGES, -1, 4 * num_classes), name='bbox_loss_reshape')
 
-    group = mx.symbol.Group([rpn_cls_prob, rpn_bbox_loss, cls_prob, bbox_loss, mx.symbol.BlockGrad(label)])
+    group = mx.symbol.Group([rpn_cls_prob, rpn_bbox_loss, mx.symbol.BlockGrad(rpn_label),
+                             cls_prob, bbox_loss, mx.symbol.BlockGrad(label)])
     return group

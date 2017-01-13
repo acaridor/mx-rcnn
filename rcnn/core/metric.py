@@ -5,8 +5,8 @@ from rcnn.config import config
 
 
 def get_rpn_names():
-    pred = ['rpn_cls_prob', 'rpn_bbox_loss']
-    label = ['rpn_label', 'rpn_bbox_target', 'rpn_bbox_weight']
+    pred = ['rpn_cls_prob', 'rpn_bbox_loss', 'rpn_label']
+    label = []
     return pred, label
 
 
@@ -28,7 +28,7 @@ class RPNAccMetric(mx.metric.EvalMetric):
 
     def update(self, labels, preds):
         pred = preds[self.pred.index('rpn_cls_prob')]
-        label = labels[self.label.index('rpn_label')]
+        label = preds[self.pred.index('rpn_label')]
 
         # pred (b, c, p) or (b, c, h, w)
         pred_label = mx.ndarray.argmax_channel(pred).asnumpy().astype('int32')
@@ -73,7 +73,7 @@ class RPNLogLossMetric(mx.metric.EvalMetric):
 
     def update(self, labels, preds):
         pred = preds[self.pred.index('rpn_cls_prob')]
-        label = labels[self.label.index('rpn_label')]
+        label = preds[self.pred.index('rpn_label')]
 
         # label (b, p)
         label = label.asnumpy().astype('int32').reshape((-1))
@@ -125,10 +125,11 @@ class RPNL1LossMetric(mx.metric.EvalMetric):
 
     def update(self, labels, preds):
         bbox_loss = preds[self.pred.index('rpn_bbox_loss')].asnumpy()
-        bbox_weight = labels[self.label.index('rpn_bbox_weight')].asnumpy()
+        label = preds[self.pred.index('rpn_label')].asnumpy()
 
         # calculate num_inst (average on those fg anchors)
-        num_inst = np.sum(bbox_weight > 0) / 4
+        keep_inds = np.where(label == 1)[0]
+        num_inst = len(keep_inds)
 
         self.sum_metric += np.sum(bbox_loss)
         self.num_inst += num_inst

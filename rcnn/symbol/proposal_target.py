@@ -32,6 +32,8 @@ class ProposalTargetOperator(mx.operator.CustomOp):
 
         all_rois = in_data[0].asnumpy()
         gt_boxes = in_data[1].asnumpy()
+        nonneg = np.where(gt_boxes[:, 4] != 0)[0]
+        gt_boxes = gt_boxes[nonneg]
 
         # Include ground-truth boxes in the set of candidate rois
         zeros = np.zeros((gt_boxes.shape[0], 1), dtype=gt_boxes.dtype)

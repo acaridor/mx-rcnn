@@ -63,12 +63,19 @@ def get_resnet_train(num_classes=config.NUM_CLASSES, num_anchors=config.NUM_ANCH
     data = mx.symbol.Variable(name="data")
     im_info = mx.symbol.Variable(name="im_info")
     gt_boxes = mx.symbol.Variable(name="gt_boxes")
-    rpn_label = mx.symbol.Variable(name='label')
-    rpn_bbox_target = mx.symbol.Variable(name='bbox_target')
-    rpn_bbox_weight = mx.symbol.Variable(name='bbox_weight')
 
     # shared convolutional layers
     conv_feat = get_resnet_conv(data)
+
+    # get rpn data
+    group = mx.symbol.Custom(
+            conv_feat=conv_feat, gt_boxes=gt_boxes, im_info=im_info, name='anchor_target',
+            op_type='anchor_target', feat_stride=config.RPN_FEAT_STRIDE,
+            scales=tuple(config.ANCHOR_SCALES), ratios=tuple(config.ANCHOR_RATIOS),
+            allowed_border=config.ALLOWED_BORDER)
+    rpn_label = group[0]
+    rpn_bbox_target = group[1]
+    rpn_bbox_weight = group[2]
 
     # RPN layers
     rpn_conv = mx.symbol.Convolution(
@@ -144,7 +151,8 @@ def get_resnet_train(num_classes=config.NUM_CLASSES, num_anchors=config.NUM_ANCH
     cls_prob = mx.symbol.Reshape(data=cls_prob, shape=(config.TRAIN.BATCH_IMAGES, -1, num_classes), name='cls_prob_reshape')
     bbox_loss = mx.symbol.Reshape(data=bbox_loss, shape=(config.TRAIN.BATCH_IMAGES, -1, 4 * num_classes), name='bbox_loss_reshape')
 
-    group = mx.symbol.Group([rpn_cls_prob, rpn_bbox_loss, cls_prob, bbox_loss, mx.symbol.BlockGrad(label)])
+    group = mx.symbol.Group([rpn_cls_prob, rpn_bbox_loss, mx.symbol.BlockGrad(rpn_label),
+                             cls_prob, bbox_loss, mx.symbol.BlockGrad(label)])
     return group
 
 

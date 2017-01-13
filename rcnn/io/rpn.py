@@ -75,11 +75,10 @@ def assign_anchor(feat_shape, gt_boxes, im_info, feat_stride=16,
     :param scales: used to generate anchors, affects num_anchors (per location)
     :param ratios: aspect ratios of generated anchors
     :param allowed_border: filter out anchors with edge overlap > allowed_border
-    :return: dict of label
+    :return: tuple of label
     'label': of shape (batch_size, 1) <- (batch_size, num_anchors, feat_height, feat_width)
     'bbox_target': of shape (batch_size, num_anchors * 4, feat_height, feat_width)
-    'bbox_inside_weight': *todo* mark the assigned anchors
-    'bbox_outside_weight': used to normalize the bbox_loss, all weights sums to RPN_POSITIVE_WEIGHT
+    'bbox_weight': mark the assigned anchors, no bbox_transform for background
     """
     def _unmap(data, count, inds, fill=0):
         """" unmap a subset inds of data into original data of size count """
@@ -94,7 +93,9 @@ def assign_anchor(feat_shape, gt_boxes, im_info, feat_stride=16,
         return ret
 
     DEBUG = False
-    im_info = im_info[0]
+    # im_info [h, w, scale], no need to use im_info[0]
+    nonneg = np.where(gt_boxes[:, 4] != 0)[0]
+    gt_boxes = gt_boxes[nonneg]
     scales = np.array(scales, dtype=np.float32)
     base_anchors = generate_anchors(base_size=feat_stride, ratios=list(ratios), scales=scales)
     num_anchors = base_anchors.shape[0]
@@ -210,7 +211,8 @@ def assign_anchor(feat_shape, gt_boxes, im_info, feat_stride=16,
     bbox_weights = _unmap(bbox_weights, total_anchors, inds_inside, fill=0)
 
     if DEBUG:
-        print 'rpn: max max_overlaps', np.max(max_overlaps)
+        if gt_boxes.size > 0:
+            print 'rpn: max max_overlaps', np.max(max_overlaps)
         print 'rpn: num_positives', np.sum(labels == 1)
         print 'rpn: num_negatives', np.sum(labels == 0)
         _fg_sum = np.sum(labels == 1)
@@ -224,7 +226,4 @@ def assign_anchor(feat_shape, gt_boxes, im_info, feat_stride=16,
     bbox_targets = bbox_targets.reshape((1, feat_height, feat_width, A * 4)).transpose(0, 3, 1, 2)
     bbox_weights = bbox_weights.reshape((1, feat_height, feat_width, A * 4)).transpose((0, 3, 1, 2))
 
-    label = {'label': labels,
-             'bbox_target': bbox_targets,
-             'bbox_weight': bbox_weights}
-    return label
+    return labels, bbox_targets, bbox_weights

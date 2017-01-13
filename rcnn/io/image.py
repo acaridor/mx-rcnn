@@ -109,6 +109,8 @@ def tensor_vstack(tensor_list, pad=0):
     :param pad: label to pad with
     :return: tensor with max shape
     """
+    if len(tensor_list) == 1:
+        return tensor_list[0]
     ndim = len(tensor_list[0].shape)
     dtype = tensor_list[0].dtype
     islice = tensor_list[0].shape[0]

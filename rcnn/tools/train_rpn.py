@@ -6,7 +6,7 @@ import mxnet as mx
 from ..config import config, default, generate_config
 from ..symbol import *
 from ..core import callback, metric
-from ..core.loader import AnchorLoader
+from ..core.loader import DetLoader
 from ..core.module import MutableModule
 from ..utils.load_data import load_gt_roidb, merge_roidb, filter_roidb
 from ..utils.load_model import load_param
@@ -26,7 +26,6 @@ def train_rpn(network, dataset, image_set, root_path, dataset_path,
 
     # load symbol
     sym = eval('get_' + network + '_rpn')(num_anchors=config.NUM_ANCHORS)
-    feat_sym = sym.get_internals()['rpn_cls_score_output']
 
     # setup multi-gpu
     batch_size = len(ctx)
@@ -44,14 +43,12 @@ def train_rpn(network, dataset, image_set, root_path, dataset_path,
     roidb = filter_roidb(roidb)
 
     # load training data
-    train_data = AnchorLoader(feat_sym, roidb, batch_size=input_batch_size, shuffle=not no_shuffle,
-                              ctx=ctx, work_load_list=work_load_list,
-                              feat_stride=config.RPN_FEAT_STRIDE, anchor_scales=config.ANCHOR_SCALES,
-                              anchor_ratios=config.ANCHOR_RATIOS, aspect_grouping=config.TRAIN.ASPECR_GROUPING)
+    train_data = DetLoader(roidb, batch_size=input_batch_size, shuffle=not no_shuffle,
+                           ctx=ctx, work_load_list=work_load_list, aspect_grouping=config.TRAIN.ASPECR_GROUPING)
 
     # infer max shape
     max_data_shape = [('data', (input_batch_size, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES])))]
-    max_data_shape, max_label_shape = train_data.infer_shape(max_data_shape)
+    max_label_shape = [('gt_boxes', (input_batch_size, 100, 5))]
     print 'providing maximum shape', max_data_shape, max_label_shape
 
     # infer shape
